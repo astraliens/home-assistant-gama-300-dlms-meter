@@ -29,6 +29,7 @@ After connecting meter you need to add `home-assistant-gama-300-dlms-meter` inte
 After this you can simply add it like regular integration, specifiying IP and port of gateway and your meter serial number (you can find it on meter itself). In several seconds integration get data from meter, create all found sensors and will update them constantly.
 
 Pinout of meter shown on photo:
+
 ![gama_300_rs485_pinout](https://raw.githubusercontent.com/astraliens/home-assistant-gama-300-dlms-meter/main/images/gama_300_rs485_pinout.jpg)
 
 
