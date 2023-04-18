@@ -1,0 +1,14 @@
+{
+  "domain": "gama_300_dlms_meter_reader",
+  "name": "GAMA 300 DLMS Meter",
+  "codeowners": ["@astraliens"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://raw.githubusercontent.com/astraliens/home-assistant-gama-300-dlms-meter",
+  "homekit": {},
+  "iot_class": "local_polling",
+  "requirements": [],
+  "ssdp": [],
+  "version": "0.1.0",
+  "zeroconf": []
+}

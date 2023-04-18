@@ -1,0 +1,38 @@
+[
+  {
+    "text": "Meter Model",
+    "meter_param": "1.0.96.1.1.255",
+    "meter_attr": 2,
+    "sensor": "info"
+  },
+  {
+    "text": "Model Config",
+    "meter_param": "1.0.96.1.2.255",
+    "meter_attr": 2,
+    "sensor": "info"
+  },
+  {
+    "text": "Meter Serial",
+    "meter_param": "1.0.0.0.0.255",
+    "meter_attr": 2,
+    "sensor": "info"
+  },
+  {
+    "text": "Meter Country ISO",
+    "meter_param": "1.0.0.0.1.255",
+    "meter_attr": 2,
+    "sensor": "info"
+  },
+  {
+    "text": "Meter Country",
+    "meter_param": "1.0.0.0.2.255",
+    "meter_attr": 2,
+    "sensor": "info"
+  },
+  {
+    "text": "Meter Firmware",
+    "meter_param": "1.0.0.2.0.255",
+    "meter_attr": 2,
+    "sensor": "info"
+  }
+]

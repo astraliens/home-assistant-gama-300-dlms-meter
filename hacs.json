@@ -1,0 +1,6 @@
+{
+  "name": "Gama 300 DLMS Meter",
+  "content_in_root": false,
+  "render_readme": true,
+  "iot_class": "Local Pull"
+}

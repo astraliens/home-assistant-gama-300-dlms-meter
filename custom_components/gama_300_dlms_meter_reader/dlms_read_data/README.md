@@ -1,5 +1,5 @@
-# Home Assistant ELGAMA GAMA300 DLMS over TCPIP
-Home Assistant Integration for reading data from ELGAMA GAMA300 electricity meter (GAMA100 not tested, but possibly supported too) via RS485-TCP Gateway
+# Home Assistant GAMA300 DLMS over TCPIP
+Home Assistant Integration for reading data from Elgama GAMA300 electricity meter (GAMA100 not tested, but possibly supported too) via RS485-TCP Gateway
 
 ## Features
 
@@ -35,10 +35,6 @@ Pinout of meter shown on photo:
 ## Energy consumption monitoring
 
 You can add `Sum Li Active power+ (QI+QIV) Time integral 1 Rate 0` sensor to your energy consumption monitoring to calculate your overall spents
-
-## DLMS Protocol
-
-Many thanks to <a href="https://www.gurux.fi/Gurux.DLMS">Gurux</a> for Python library implementation which used in this integration to retrieve data from meter
 
 ## Donations
 
