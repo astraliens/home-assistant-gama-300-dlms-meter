@@ -9,15 +9,7 @@ import random
 
 from homeassistant.const import (
     ATTR_VOLTAGE,
-    DEVICE_CLASS_BATTERY,
     PERCENTAGE,
-    DEVICE_CLASS_CURRENT,
-    DEVICE_CLASS_ENERGY,
-    DEVICE_CLASS_FREQUENCY,
-    DEVICE_CLASS_POWER_FACTOR,
-    DEVICE_CLASS_POWER,
-    DEVICE_CLASS_TEMPERATURE,
-    DEVICE_CLASS_VOLTAGE,
     EntityCategory
 )
 from homeassistant.helpers.entity import Entity
@@ -46,8 +38,6 @@ from homeassistant.components.light import LightEntity
 from .const import DOMAIN
 from datetime import timedelta
 import time
-
-from homeassistant.components.sensor import STATE_CLASS_TOTAL_INCREASING
 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -267,31 +257,31 @@ class SensorDLMSMeterVoltage(SensorDLMSMeter):
     def __init__(self, coordinator, dlmsmeter_param):
         super().__init__(coordinator, dlmsmeter_param)
         self.state_class = SensorStateClass.MEASUREMENT
-        self.device_class = DEVICE_CLASS_VOLTAGE
+        self.device_class = SensorDeviceClass.VOLTAGE
 
 class SensorDLMSMeterCurrent(SensorDLMSMeter):
     def __init__(self, coordinator, dlmsmeter_param):
         super().__init__(coordinator, dlmsmeter_param)
         self.state_class = SensorStateClass.MEASUREMENT
-        self.device_class = DEVICE_CLASS_CURRENT
+        self.device_class = SensorDeviceClass.CURRENT
 
 class SensorDLMSMeterPowerFactor(SensorDLMSMeter):
     def __init__(self, coordinator, dlmsmeter_param):
         super().__init__(coordinator, dlmsmeter_param)
         self.state_class = SensorStateClass.MEASUREMENT
-        self.device_class = DEVICE_CLASS_POWER_FACTOR
+        self.device_class = SensorDeviceClass.POWER_FACTOR 
 
 class SensorDLMSMeterFrequency(SensorDLMSMeter):
     def __init__(self, dlmsmeter, param_name):
         super().__init__(dlmsmeter, param_name)
         self.state_class = SensorStateClass.MEASUREMENT
-        self.device_class = DEVICE_CLASS_FREQUENCY
+        self.device_class = SensorDeviceClass.FREQUENCY
 
 class SensorDLMSMeterPower(SensorDLMSMeter):
     def __init__(self, dlmsmeter, param_name):
         super().__init__(dlmsmeter, param_name)
         self.state_class = SensorStateClass.MEASUREMENT
-        self.device_class = DEVICE_CLASS_POWER
+        self.device_class = SensorDeviceClass.POWER
 
 class SensorDLMSMeterEnergyTotal(SensorDLMSMeter):
     def __init__(self, dlmsmeter, param_name):
