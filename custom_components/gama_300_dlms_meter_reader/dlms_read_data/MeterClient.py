@@ -78,6 +78,7 @@ class MeterClient:
         self.reader.initializeConnection()
         self.reader.getAssociationView()
         self.connected=True # need to detect later if there were any errors during connection and define connected status based on this result
+        self.connecting=False
 
     def disconnect(self):
         self.connecting=False
