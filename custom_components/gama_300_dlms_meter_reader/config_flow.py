@@ -28,6 +28,10 @@ DATA_SCHEMA = vol.Schema({
     ("host"): str,
     ("port"): int,
     ("serial"): int,
+    vol.Required(
+        "entity_type",
+        default="Default",
+    ): vol.In(["Default", "IP", "Serial"]),
 })
 
 async def validate_input(hass: HomeAssistant, data: dict) -> dict[str, Any]:
@@ -43,7 +47,7 @@ async def validate_input(hass: HomeAssistant, data: dict) -> dict[str, Any]:
     if len(data["host"]) < 3:
         raise InvalidHost
 
-    hub = Hub(hass, data["host"],data["port"],data["serial"])
+    hub = Hub(hass, data["host"],data["port"],data["serial"],data["entity_type"],)
     # The dummy hub provides a `test_connection` method to ensure it's working
     # as expected
     result = await hub.test_connection()

@@ -18,7 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 class Hub:
     manufacturer = "DLMS Meter"
 
-    def __init__(self, hass: HomeAssistant, host: str, port: int, serial: int) -> None:
+    def __init__(self, hass: HomeAssistant, host: str, port: int, serial: int, entity_type: str) -> None:
         """Init hub."""
         self._host = host
         self._port = port
@@ -26,7 +26,16 @@ class Hub:
         self._hass = hass
         self.meter_client=MeterClient(host,port,serial)
         self._name = "DLMS Meter " + host
+        self._entity_type=entity_type.lower()
         self._id = host.lower()
+        
+        if entity_type.lower() == "ip":
+            self._id = host.lower()
+        
+        if entity_type.lower() == "serial":
+            self._id = str(serial)
+            self._name = "DLMS Meter " + host + " (" + str(serial) + ")"
+
         #self.manufacturer=self.meter_client.get_model2()
         self.manufacturer='DLMS Meter Manufacturer'
         self.meters = [

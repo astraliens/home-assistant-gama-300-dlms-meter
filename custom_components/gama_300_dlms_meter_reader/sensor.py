@@ -214,7 +214,14 @@ class SensorDLMSMeter(SensorBase):
         #self.sensor_name=dlmsmeter_param["text"]
         self.meter_param=dlmsmeter_param["meter_param"]
         self._attr_name = f"{dlmsmeter_param['text']}"
-        self._attr_unique_id = f"dlms_meter_{self.hub._id}_{dlmsmeter_param['meter_param']}"
+        
+        if self.hub._entity_type == "ip":
+            self._attr_name= self._attr_name + " (" + self.hub._id + ")"
+        
+        if self.hub._entity_type == "serial":
+            self._attr_name= self._attr_name + " (" + self.hub._id + ")"
+        
+        #self._attr_unique_id = f"dlms_meter_{self.hub._id}_{dlmsmeter_param['meter_param']}"
         #self.sensor_name=self._attr_unique_id
         self._state = 0
         if "unit" in dlmsmeter_param :

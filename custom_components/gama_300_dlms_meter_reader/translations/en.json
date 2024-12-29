@@ -14,6 +14,7 @@
                     "host": "Meter IP",
                     "port": "Meter Port",
                     "serial": "Meter serial number",
+                    "entity_type": "Add to entity name",
                     "password": "[%key:common::config_flow::data::password%]",
                     "username": "[%key:common::config_flow::data::username%]"
                 }
