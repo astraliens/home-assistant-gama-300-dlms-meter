@@ -1,10 +1,4 @@
 """Platform for sensor integration."""
-# This file shows the setup for the sensors associated with the cover.
-# They are setup in the same way with the call to the async_setup_entry function
-# via HA from the module __init__. Each sensor has a device_class, this tells HA how
-# to display it in the UI (for know types). The unit_of_measurement property tells HA
-# what the unit is, so it can display the correct range. For predefined types (such as
-# battery), the unit_of_measurement should match what's expected.
 import random
 
 from homeassistant.const import (
@@ -26,7 +20,7 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
-import async_timeout
+import asyncio
 from homeassistant.core import callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.components.light import LightEntity
@@ -44,18 +38,17 @@ _LOGGER = logging.getLogger(__name__)
 #SCAN_INTERVAL = timedelta(seconds=5)
 
 
-# See cover.py for more details.
-# Note how both entities for each dlmsmeter sensor (battry and illuminance) are added at
-# the same time to the same list. This way only a single async_add_devices call is
-# required.
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Add sensors for passed config_entry in HA."""
     hub = hass.data[DOMAIN][config_entry.entry_id]
 
-    coordinator = DLMSMeterDataCoordinator(hass, hub)
+    # One throttle for both coordinators so they do not reconnect independently.
+    reconnect_throttle = _ReconnectThrottle()
+
+    coordinator = DLMSMeterDataCoordinator(hass, hub, reconnect_throttle)
     await coordinator.async_config_entry_first_refresh()
 
-    coordinator_diag = DLMSMeterConfigCoordinator(hass, hub)
+    coordinator_diag = DLMSMeterConfigCoordinator(hass, hub, reconnect_throttle)
     await coordinator_diag.async_config_entry_first_refresh()    
 
 
@@ -95,86 +88,120 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         async_add_entities(new_devices)
 
 
-class DLMSMeterDataCoordinator(DataUpdateCoordinator):
-    """My custom coordinator."""
+class _ReconnectThrottle:
+    """Backoff for reconnect attempts during outages (5s…60s).
 
-    def __init__(self, hass, hub):
-        """Initialize my coordinator."""
+    Failed polls still raise UpdateFailed immediately; only reconnect is
+    delayed. claim_attempt() is sync so two coordinators cannot both start
+    a reconnect in the same event-loop tick.
+    """
+
+    _INITIAL_COOLDOWN = 5.0
+    _MAX_COOLDOWN = 60.0
+
+    def __init__(self):
+        self._next_attempt = 0.0
+        self._cooldown = self._INITIAL_COOLDOWN
+        self._in_flight = False
+
+    def claim_attempt(self):
+        """Reserve a reconnect slot, or return False if still cooling down."""
+        if self._in_flight or time.monotonic() < self._next_attempt:
+            return False
+        self._in_flight = True
+        # Placeholder until release(); overwritten on normal completion.
+        self._next_attempt = time.monotonic() + self._cooldown
+        return True
+
+    def release(self, success):
+        """Clear in-flight and update the cooldown from the attempt result."""
+        if success:
+            self._cooldown = self._INITIAL_COOLDOWN
+            self._next_attempt = time.monotonic()
+        else:
+            self._next_attempt = time.monotonic() + self._cooldown
+            self._cooldown = min(self._cooldown * 2, self._MAX_COOLDOWN)
+        self._in_flight = False
+
+    def reset(self):
+        """Reset after a successful poll."""
+        self._cooldown = self._INITIAL_COOLDOWN
+        self._next_attempt = 0.0
+
+
+async def _attempt_reconnect(hass, hub, throttle):
+    """Executor reconnect; only CancelledError can escape."""
+    if not throttle.claim_attempt():
+        return
+    success = False
+    try:
+        await hass.async_add_executor_job(hub.reconnect)
+        success = True
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        _LOGGER.debug("Reconnect attempt failed", exc_info=True)
+    finally:
+        throttle.release(success)
+
+
+class DLMSMeterDataCoordinator(DataUpdateCoordinator):
+    """Coordinator for the fast-changing measurement data."""
+
+    def __init__(self, hass, hub, reconnect_throttle):
+        """Initialize the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
-            # Name of the data. For logging purposes.
             name="Meter Data Coordinator",
-            # Polling interval. Will only be polled if there are subscribers.
             update_interval=timedelta(seconds=3),
         )
         self.hub = hub
-        self.hass=hass
+        self.hass = hass
+        self._reconnect_throttle = reconnect_throttle
 
     async def _async_update_data(self):
-        """Fetch data from API endpoint.
-
-        This is the place to pre-process the data to lookup tables
-        so entities can quickly look up their data.
-        """
         try:
-            # Note: asyncio.TimeoutError and aiohttp.ClientError are already
-            # handled by the data update coordinator.
-            async with async_timeout.timeout(30):
-                # Grab active context variables to limit data required to be fetched from API
-                # Note: using context is not required if there is no need or ability to limit
-                # data retrieved from API.
-                listening_idx = set(self.async_contexts())
-                #return await self.hub.fetch_data(listening_idx)
+            async with asyncio.timeout(30):
+                data = await self.hass.async_add_executor_job(self.hub.read_all_data)
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            _LOGGER.error("Meter data update failed: %s", err)
+            await _attempt_reconnect(self.hass, self.hub, self._reconnect_throttle)
+            raise UpdateFailed(err) from err
+        else:
+            self._reconnect_throttle.reset()
+            return data
 
-                return await self.hass.async_add_executor_job(self.hub.meter_client.ReadAllDataSYNC) # nedd to avoid problem with UI freezing during data update process
-                #return await self.hub.meter_client.ReadAllData()
-                
-        except Exception as e:
-            s = str(e)
-            # Raising ConfigEntryAuthFailed will cancel future updates
-            # and start a config flow with SOURCE_REAUTH (async_step_reauth)
-            _LOGGER.error("-------------------- COORDINATOR DATA UPDATE FAILED ----------------" + s)
-            self.hub.meter_client.reconnect()
-        
 
 class DLMSMeterConfigCoordinator(DataUpdateCoordinator):
-    """My custom coordinator."""
+    """Coordinator for the slow-changing diagnostic/config data."""
 
-    def __init__(self, hass, hub):
-        """Initialize my coordinator."""
+    def __init__(self, hass, hub, reconnect_throttle):
+        """Initialize the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
-            # Name of the data. For logging purposes.
             name="Meter Config Coordinator",
-            # Polling interval. Will only be polled if there are subscribers.
             update_interval=timedelta(seconds=600),
         )
         self.hub = hub
+        self._reconnect_throttle = reconnect_throttle
 
     async def _async_update_data(self):
-        """Fetch data from API endpoint.
-
-        This is the place to pre-process the data to lookup tables
-        so entities can quickly look up their data.
-        """
         try:
-            # Note: asyncio.TimeoutError and aiohttp.ClientError are already
-            # handled by the data update coordinator.
-            async with async_timeout.timeout(20):
-                # Grab active context variables to limit data required to be fetched from API
-                # Note: using context is not required if there is no need or ability to limit
-                # data retrieved from API.
-                listening_idx = set(self.async_contexts())
-                #return await self.hub.fetch_data(listening_idx)
-                return await self.hub.meter_client.ReadAllConfig()
-                
-        except Exception as e:
-            s = str(e)
-            # Raising ConfigEntryAuthFailed will cancel future updates
-            # and start a config flow with SOURCE_REAUTH (async_step_reauth)
-            _LOGGER.error("-------------------- COORDINATOR CONFIG UPDATE FAILED ----------------" + s)
+            async with asyncio.timeout(20):
+                data = await self.hass.async_add_executor_job(self.hub.read_all_config)
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            _LOGGER.error("Meter config update failed: %s", err)
+            await _attempt_reconnect(self.hass, self.hub, self._reconnect_throttle)
+            raise UpdateFailed(err) from err
+        else:
+            self._reconnect_throttle.reset()
+            return data
 
 
 class SensorBase(CoordinatorEntity, SensorEntity):
@@ -245,13 +272,19 @@ class SensorDLMSMeter(SensorBase):
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        self.last_state=self.GtCurrentParamData()['value']
+        current = self.GtCurrentParamData()
+        if current is not None:
+            self.last_state = current['value']
         self.async_write_ha_state()
-        
+
     def GtCurrentParamData(self):
+        # First refresh may leave coordinator.data as None.
+        if self.coordinator.data is None:
+            return None
         for data_item in self.coordinator.data:
             if(data_item['meter_param']==self.meter_param):
                 return data_item
+        return None
 
     @property
     def state(self) :
