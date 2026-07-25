@@ -13,6 +13,14 @@ class Hub:
     call them through the executor from async code.
     """
 
+    # OBIS -> DeviceInfo field. Keyed by OBIS because the display text can be reworded.
+    _DEVICE_INFO_OBIS = {
+        "1.0.96.1.1.255": "model",
+        "1.0.96.1.2.255": "model_id",
+        "1.0.0.0.0.255": "serial_number",
+        "1.0.0.2.0.255": "sw_version",
+    }
+
     def __init__(self, hass: HomeAssistant, host: str, port: int, serial: int, entity_type: str) -> None:
         """Init hub."""
         self._host = host
@@ -31,6 +39,19 @@ class Hub:
         self.meters = [
             DLMSMeter(f"{self._id}_1", f"{self._name}", self),
         ]
+
+        # Populated by the config coordinator; read by SensorDLMSMeter.device_info.
+        self.device_info_data: dict[str, str] = {}
+
+    def update_device_info(self, config_items) -> None:
+        """Refresh device metadata from a config read; skip empty so partial reads keep prior values."""
+        for item in config_items:
+            field = self._DEVICE_INFO_OBIS.get(item.get("meter_param"))
+            if field is None:
+                continue
+            value = item.get("value")
+            if value is not None and value != "":
+                self.device_info_data[field] = value
 
     @property
     def hub_id(self) -> str:
@@ -81,10 +102,12 @@ class DLMSMeter:
         return self._id
 
     def get_available_params(self):
-        return self.hub.meter_client.GetDataList()
+        meter_client = self.hub.meter_client
+        return meter_client.filter_known(meter_client.GetDataList())
 
     def get_available_diag_params(self):
-        return self.hub.meter_client.GetMeterConfigList()
+        meter_client = self.hub.meter_client
+        return meter_client.filter_known(meter_client.GetMeterConfigList())
 
     @property
     def online(self) -> bool:

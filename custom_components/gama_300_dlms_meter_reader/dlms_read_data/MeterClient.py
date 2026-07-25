@@ -162,8 +162,38 @@ class MeterClient:
     def ReadItem(self,item,attr):
         return self.read_item(item, attr)
 
+    def list_available_obis(self):
+        """Logical names present in the association view; no I/O (already fetched by connect())."""
+        with self._lock:
+            available = set()
+            for obj in self.settings.client.objects:
+                try:
+                    name = obj.logicalName
+                    if not isinstance(name, str):
+                        continue
+                    name = name.strip()
+                    if name:
+                        available.add(name)
+                except Exception:
+                    continue
+            return available
+
+    def filter_known(self, items):
+        """Drop items whose OBIS is absent from the association view.
+
+        Trusted only when the view is non-empty: an empty or unreadable view
+        falls back to the full list so a connection hiccup never hides entities.
+        """
+        try:
+            available = self.list_available_obis()
+        except Exception:
+            return items
+        if not available:
+            return items
+        return [item for item in items if item['meter_param'] in available]
+
     def _apply_multiplier(self, item, res):
-        if 'multiplier' in item:
+        if 'multiplier' in item and isinstance(res, (int, float)):
             res = res * item['multiplier']
             if type(item['multiplier']) == float:
                 precision = self.MultiplierToPrecision(item['multiplier'])
@@ -174,7 +204,7 @@ class MeterClient:
         """Read all data OBIS values from the parameter list."""
         with self._lock:
             total_list=[]
-            for item in self.GetDataList():
+            for item in self.filter_known(self.GetDataList()):
                 res=self.read_item(item['meter_param'],item['meter_attr'])
                 res=self._apply_multiplier(item, res)
 
@@ -212,7 +242,7 @@ class MeterClient:
         """Read all diagnostic/config OBIS values from the parameter list."""
         with self._lock:
             total_list=[]
-            for item in self.GetMeterConfigList():
+            for item in self.filter_known(self.GetMeterConfigList()):
                 res=self.read_item(item['meter_param'],item['meter_attr'])
                 item['value']=res
                 total_list.append(item)

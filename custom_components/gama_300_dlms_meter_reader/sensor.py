@@ -1,16 +1,11 @@
 """Platform for sensor integration."""
-import random
+from datetime import datetime, timedelta
+import time
 
-from homeassistant.const import (
-    ATTR_VOLTAGE,
-    PERCENTAGE,
-    EntityCategory
-)
-from homeassistant.helpers.entity import Entity
+from homeassistant.const import EntityCategory
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
-    SensorEntityDescription,
     SensorStateClass,
     SensorEntity
 )
@@ -21,21 +16,13 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 import asyncio
-from homeassistant.core import callback
-from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.components.light import LightEntity
-
-
-
-
+import homeassistant.util.dt as dt_util
 
 from .const import DOMAIN
-from datetime import timedelta
-import time
+from .model_config import decode_model_config
 
 import logging
 _LOGGER = logging.getLogger(__name__)
-#SCAN_INTERVAL = timedelta(seconds=5)
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
@@ -49,8 +36,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     await coordinator.async_config_entry_first_refresh()
 
     coordinator_diag = DLMSMeterConfigCoordinator(hass, hub, reconnect_throttle)
-    await coordinator_diag.async_config_entry_first_refresh()    
-
+    await coordinator_diag.async_config_entry_first_refresh()
 
     new_devices = []
     for dlmsmeter in hub.meters:
@@ -64,7 +50,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 case "frequency":
                     new_devices.append(SensorDLMSMeterFrequency(coordinator, dlmsmeter_param))
                 case "power":
-                    new_devices.append(SensorDLMSMeterPower(coordinator, dlmsmeter_param))
+                    # Source data labels reactive power as VA; HA POWER accepts only W.
+                    if dlmsmeter_param.get("unit") == "W":
+                        new_devices.append(SensorDLMSMeterPower(coordinator, dlmsmeter_param))
+                    else:
+                        new_devices.append(SensorDLMSMeterReactivePower(coordinator, dlmsmeter_param))
                 case "power_factor":
                     new_devices.append(SensorDLMSMeterPowerFactor(coordinator, dlmsmeter_param))
                 case "energy_total":
@@ -77,12 +67,21 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                     new_devices.append(SensorDLMSMeterInfo(coordinator, dlmsmeter_param))
                 case "time_duration":
                     new_devices.append(SensorDLMSMeterTimeDuration(coordinator, dlmsmeter_param))
+                case "date":
+                    new_devices.append(SensorDLMSMeterDate(coordinator, dlmsmeter_param))
 
         available_diag_params=dlmsmeter.get_available_diag_params()
         for dlmsmeter_param in available_diag_params:
             match dlmsmeter_param["sensor"]:
                 case "info":
-                    new_devices.append(SensorDLMSMeterDiagInfo(coordinator_diag, dlmsmeter_param))
+                    if dlmsmeter_param["meter_param"] == _MODEL_CONFIG_OBIS:
+                        new_devices.append(SensorDLMSMeterModelConfig(coordinator_diag, dlmsmeter_param))
+                    else:
+                        new_devices.append(SensorDLMSMeterDiagInfo(coordinator_diag, dlmsmeter_param))
+                case "counter":
+                    new_devices.append(SensorDLMSMeterDiagCounter(coordinator_diag, dlmsmeter_param))
+                case "time_duration":
+                    new_devices.append(SensorDLMSMeterDiagTimeDuration(coordinator_diag, dlmsmeter_param))
 
     if new_devices:
         async_add_entities(new_devices)
@@ -201,22 +200,12 @@ class DLMSMeterConfigCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(err) from err
         else:
             self._reconnect_throttle.reset()
+            self.hub.update_device_info(data)
             return data
 
 
 class SensorBase(CoordinatorEntity, SensorEntity):
-    """An entity using CoordinatorEntity.
-
-    The CoordinatorEntity class provides:
-      should_poll
-      async_update
-      async_added_to_hass
-      available
-
-    """
-
-    device_class = ""
-    state_class = "" 
+    """Base entity backed by a DataUpdateCoordinator."""
 
     def __init__(self, coordinator, dlmsmeter_param):
         """Pass coordinator to CoordinatorEntity."""
@@ -225,57 +214,34 @@ class SensorBase(CoordinatorEntity, SensorEntity):
         self.dlmsmeter_param = dlmsmeter_param
         self._attr_unique_id = f"dlms_meter_{self.hub._id}_{dlmsmeter_param['meter_param']}"
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
-        test =1
-        """
-        #self._attr_is_on = self.coordinator.data[self.idx]["text"]
-        self._attr_is_on = 1
-        self.async_write_ha_state()
-        """
 
 class SensorDLMSMeter(SensorBase):
     def __init__(self, coordinator, dlmsmeter_param):
         super().__init__(coordinator, dlmsmeter_param)
-        #self.sensor_name=dlmsmeter_param["text"]
         self.meter_param=dlmsmeter_param["meter_param"]
         self._attr_name = f"{dlmsmeter_param['text']}"
-        
+
         if self.hub._entity_type == "ip":
             self._attr_name= self._attr_name + " (" + self.hub._id + ")"
-        
+
         if self.hub._entity_type == "serial":
             self._attr_name= self._attr_name + " (" + self.hub._id + ")"
-        
-        #self._attr_unique_id = f"dlms_meter_{self.hub._id}_{dlmsmeter_param['meter_param']}"
-        #self.sensor_name=self._attr_unique_id
-        self._state = 0
+
         if "unit" in dlmsmeter_param :
             self._attr_native_unit_of_measurement = dlmsmeter_param["unit"]
-        self.last_state=''
 
     @property
     def device_info(self):
         """Return information to link this entity with the correct device."""
-        # return {"identifiers": {(DOMAIN, self.hub._id)}}
-
-        return {
+        info = {
             "identifiers": {(DOMAIN, self.hub._id)},
             # If desired, the name for the device could be different to the entity
             "name": self.hub._name,
-            #"sw_version": self.hub.meter_client.get_firmware_version(),
-            #"model": self.hub.meter_client.get_model(),
-            "manufacturer": self.hub.meter_client.get_manufacturer()
-        }    
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
-        current = self.GtCurrentParamData()
-        if current is not None:
-            self.last_state = current['value']
-        self.async_write_ha_state()
+            "manufacturer": self.hub.meter_client.get_manufacturer(),
+        }
+        # From the 600s config poll; skip fields not read yet.
+        info.update(self.hub.device_info_data)
+        return info
 
     def GtCurrentParamData(self):
         # First refresh may leave coordinator.data as None.
@@ -287,75 +253,123 @@ class SensorDLMSMeter(SensorBase):
         return None
 
     @property
-    def state(self) :
-        return self.last_state
-        #self.coordinator.data
-        #return self.GtCurrentParamData()['value']
+    def native_value(self):
+        current = self.GtCurrentParamData()
+        if current is None:
+            return None
+        return current["value"]
 
 
 class SensorDLMSMeterVoltage(SensorDLMSMeter):
-    def __init__(self, coordinator, dlmsmeter_param):
-        super().__init__(coordinator, dlmsmeter_param)
-        self.state_class = SensorStateClass.MEASUREMENT
-        self.device_class = SensorDeviceClass.VOLTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.VOLTAGE
 
 class SensorDLMSMeterCurrent(SensorDLMSMeter):
-    def __init__(self, coordinator, dlmsmeter_param):
-        super().__init__(coordinator, dlmsmeter_param)
-        self.state_class = SensorStateClass.MEASUREMENT
-        self.device_class = SensorDeviceClass.CURRENT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.CURRENT
 
 class SensorDLMSMeterPowerFactor(SensorDLMSMeter):
-    def __init__(self, coordinator, dlmsmeter_param):
-        super().__init__(coordinator, dlmsmeter_param)
-        self.state_class = SensorStateClass.MEASUREMENT
-        self.device_class = SensorDeviceClass.POWER_FACTOR 
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.POWER_FACTOR
 
 class SensorDLMSMeterFrequency(SensorDLMSMeter):
-    def __init__(self, dlmsmeter, param_name):
-        super().__init__(dlmsmeter, param_name)
-        self.state_class = SensorStateClass.MEASUREMENT
-        self.device_class = SensorDeviceClass.FREQUENCY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.FREQUENCY
 
 class SensorDLMSMeterPower(SensorDLMSMeter):
-    def __init__(self, dlmsmeter, param_name):
-        super().__init__(dlmsmeter, param_name)
-        self.state_class = SensorStateClass.MEASUREMENT
-        self.device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.POWER
+
+class SensorDLMSMeterReactivePower(SensorDLMSMeter):
+    """Reactive power; source unit is mislabelled VA, so leave device_class unset."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
 class SensorDLMSMeterEnergyTotal(SensorDLMSMeter):
-    def __init__(self, dlmsmeter, param_name):
-        super().__init__(dlmsmeter, param_name)
-        self.device_class = SensorDeviceClass.ENERGY
-        self.state_class = SensorStateClass.TOTAL
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL
 
 class SensorDLMSMeterEnergyTotalIncreasing(SensorDLMSMeter):
-    def __init__(self, dlmsmeter, param_name):
-        super().__init__(dlmsmeter, param_name)
-        self.device_class = SensorDeviceClass.ENERGY
-        self.state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
 class SensorDLMSMeterInfo(SensorDLMSMeter):
-    def __init__(self, dlmsmeter, param_name):
-        super().__init__(dlmsmeter, param_name)
+    pass
 
 class SensorDLMSMeterCounter(SensorDLMSMeter):
-    def __init__(self, dlmsmeter, param_name):
-        super().__init__(dlmsmeter, param_name)
-        self.state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
 class SensorDLMSMeterTimeDuration(SensorDLMSMeter):
-    def __init__(self, dlmsmeter, param_name):
-        super().__init__(dlmsmeter, param_name)
-        #self.state_class = SensorStateClass.MEASUREMENT
-        self.device_class = SensorDeviceClass.DURATION
+    _attr_device_class = SensorDeviceClass.DURATION
+
+class SensorDLMSMeterDate(SensorDLMSMeter):
+    """Billing-period close timestamp. GXDateTime may import under two paths; duck-type .value."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    @property
+    def native_value(self):
+        current = self.GtCurrentParamData()
+        if current is None:
+            return None
+        raw = getattr(current["value"], "value", None)
+        if not isinstance(raw, datetime):
+            return None
+        # Meter reports local time when it omits the UTC deviation.
+        if raw.tzinfo is None:
+            raw = raw.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+        return dt_util.as_utc(raw)
+
+_MODEL_OBIS = "1.0.96.1.1.255"
+_MODEL_CONFIG_OBIS = "1.0.96.1.2.255"
+
+# OBIS -> icon for diagnostic sensors. Keyed by OBIS because the display text can be reworded.
+_DIAG_ICONS = {
+    "1.0.96.1.1.255": "mdi:chip",
+    "1.0.96.1.2.255": "mdi:cog",
+    "1.0.0.0.0.255": "mdi:barcode",
+    "1.0.0.0.1.255": "mdi:flag",
+    "1.0.0.0.2.255": "mdi:map",
+    "1.0.0.2.0.255": "mdi:update",
+    "1.0.96.61.10.255": "mdi:timer-sand",
+    "1.0.96.60.12.255": "mdi:flash-alert",
+    "1.0.96.61.12.255": "mdi:timer-sand",
+    "1.0.96.60.13.255": "mdi:flash-alert",
+    "1.0.96.61.13.255": "mdi:timer-sand",
+    "1.0.96.60.50.255": "mdi:alert-circle-outline",
+}
+
 
 class SensorDLMSMeterDiag(SensorDLMSMeter):
-    entity_category = EntityCategory.DIAGNOSTIC
-    def __init__(self, dlmsmeter, param_name):
-        super().__init__(dlmsmeter, param_name)
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, dlmsmeter_param):
+        super().__init__(coordinator, dlmsmeter_param)
+        icon = _DIAG_ICONS.get(dlmsmeter_param["meter_param"])
+        if icon is not None:
+            self._attr_icon = icon
 
 class SensorDLMSMeterDiagInfo(SensorDLMSMeterDiag):
-    def __init__(self, dlmsmeter, param_name):
-        super().__init__(dlmsmeter, param_name)
+    pass
 
+class SensorDLMSMeterModelConfig(SensorDLMSMeterDiagInfo):
+    """Model Config; state stays the raw order code, decoded fields go in attributes."""
+
+    @property
+    def extra_state_attributes(self):
+        data = self.coordinator.data
+        model = None
+        if data:
+            for item in data:
+                if item.get("meter_param") == _MODEL_OBIS:
+                    model = item.get("value")
+                    break
+        return decode_model_config(model, self.native_value)
+
+class SensorDLMSMeterDiagCounter(SensorDLMSMeterDiag, SensorDLMSMeterCounter):
+    # Lifetime event counts; base Counter stays MEASUREMENT for live-cycle entities.
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+class SensorDLMSMeterDiagTimeDuration(SensorDLMSMeterDiag, SensorDLMSMeterTimeDuration):
+    # Lifetime cumulative seconds; base TimeDuration intentionally has no state class.
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING

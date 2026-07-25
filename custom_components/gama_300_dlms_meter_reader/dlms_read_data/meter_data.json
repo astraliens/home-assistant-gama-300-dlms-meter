@@ -247,5 +247,13 @@
     "multiplier": 0.1,
     "unit": "Wh",
     "sensor": "energy_total_increasing"
+  },
+  {
+    "text": "Sum Li Active power- (QII+QIII) Time integral 1 Rate 0",
+    "meter_param": "1.0.2.8.0.255",
+    "meter_attr": 2,
+    "multiplier": 0.1,
+    "unit": "Wh",
+    "sensor": "energy_total"
   }
 ]
