@@ -1,24 +1,111 @@
 {
     "config": {
         "abort": {
-            "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+            "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+            "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]",
+            "wrong_meter": "The meter at this address has a different serial number than the one configured here. Add it as a new integration entry instead.",
+            "duplicate_meter_identity": "This meter serial number is already used by another config entry. Remove the duplicate entry before reconfiguring this one."
         },
         "error": {
             "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
             "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
-            "unknown": "[%key:common::config_flow::error::unknown%]"
+            "unknown": "[%key:common::config_flow::error::unknown%]",
+            "entry_busy": "This meter connection is currently starting up or shutting down. Please try again in a few seconds."
         },
         "step": {
             "user": {
                 "data": {
                     "host": "Meter IP",
-                    "port": "Meter Port",
+                    "port": "Meter port",
                     "serial": "Meter serial number",
-                    "entity_type": "Add to entity name",
+                    "entity_type": "Suffix for entity names",
                     "password": "[%key:common::config_flow::data::password%]",
                     "username": "[%key:common::config_flow::data::username%]"
+                },
+                "data_description": {
+                    "host": "IP address or hostname of the meter gateway (for example an RS485-to-TCP converter).",
+                    "port": "TCP port of the DLMS gateway (often 4059).",
+                    "serial": "Serial number printed on the electricity meter. Used to identify this meter in Home Assistant.",
+                    "entity_type": "Optional text appended to sensor names so several meters stay distinguishable. Use Default when only one meter is configured.",
+                    "username": "DLMS client user name, if the meter requires authentication.",
+                    "password": "DLMS password for the user above."
+                }
+            },
+            "reconfigure": {
+                "title": "Update meter connection",
+                "description": "Change the gateway address for meter {serial}. The device, its entities and their history stay exactly as they are; only the connection is redirected.",
+                "data": {
+                    "host": "Meter IP",
+                    "port": "Meter port"
+                },
+                "data_description": {
+                    "host": "New IP address or hostname of the meter gateway.",
+                    "port": "New TCP port of the DLMS gateway (often 4059)."
                 }
             }
         }
-   }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Polling intervals",
+                "data": {
+                    "scan_interval": "Live data interval (seconds)",
+                    "diag_scan_interval": "Diagnostic data interval (seconds)"
+                },
+                "data_description": {
+                    "scan_interval": "How often to poll live measurements (voltage, power, energy...). Default 3, allowed range 3-3600.",
+                    "diag_scan_interval": "How often to poll slow-changing diagnostic/config values. Default 600, allowed range 60-86400."
+                }
+            }
+        }
+    },
+    "entity": {
+        "number": {
+            "frequency_min_hz": { "name": "Minimum frequency" },
+            "frequency_max_hz": { "name": "Maximum frequency" },
+            "voltage_min_v": { "name": "Minimum acceptable voltage" },
+            "voltage_max_v": { "name": "Maximum acceptable voltage" },
+            "grid_outage_voltage_v": { "name": "Grid outage threshold" },
+            "voltage_hysteresis_v": { "name": "Voltage hysteresis" },
+            "phase_l1_max_power_w": { "name": "L1 maximum active power" },
+            "phase_l2_max_power_w": { "name": "L2 maximum active power" },
+            "phase_l3_max_power_w": { "name": "L3 maximum active power" },
+            "total_max_power_w": { "name": "Total maximum active power" },
+            "power_hysteresis_w": { "name": "Power hysteresis" }
+        },
+        "binary_sensor": {
+            "frequency_problem": { "name": "Frequency problem" },
+            "voltage_problem": { "name": "Voltage problem" },
+            "grid_outage": { "name": "Grid outage" },
+            "phase_l1_overload": { "name": "L1 overload" },
+            "phase_l2_overload": { "name": "L2 overload" },
+            "phase_l3_overload": { "name": "L3 overload" },
+            "total_power_overload": { "name": "Total power overload" }
+        },
+        "sensor": {
+            "minimum_phase_voltage": { "name": "Minimum phase voltage" },
+            "maximum_phase_voltage": { "name": "Maximum phase voltage" }
+        }
+    },
+    "exceptions": {
+        "invalid_number": {
+            "message": "Value for {key} must be a finite number."
+        },
+        "invalid_frequency_range": {
+            "message": "Frequency limits must satisfy 0 < minimum < maximum <= 100 Hz."
+        },
+        "invalid_voltage_range": {
+            "message": "Voltage thresholds must satisfy 0 <= grid outage threshold < minimum < maximum <= 500 V."
+        },
+        "invalid_voltage_hysteresis": {
+            "message": "Voltage hysteresis must leave a valid recovery range: hysteresis >= 0, outage threshold + hysteresis <= minimum, and 2 x hysteresis < maximum - minimum."
+        },
+        "invalid_power_limit": {
+            "message": "Each active power limit must be a finite number greater than 0 W."
+        },
+        "invalid_power_hysteresis": {
+            "message": "Power hysteresis must be at least 0 W and less than the smallest active power limit."
+        }
+    }
 }

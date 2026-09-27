@@ -1,6 +1,5 @@
 """Platform for sensor integration."""
-from datetime import datetime, timedelta
-import time
+from datetime import datetime
 
 from homeassistant.const import EntityCategory
 
@@ -10,16 +9,19 @@ from homeassistant.components.sensor import (
     SensorEntity
 )
 
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-    UpdateFailed,
-)
-import asyncio
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 import homeassistant.util.dt as dt_util
 
-from .const import DOMAIN
+from .const import build_unique_id
+# Re-exported for backward compatibility: these used to live in this module.
+from .coordinator import (  # noqa: F401
+    DLMSMeterConfigCoordinator,
+    DLMSMeterDataCoordinator,
+    _attempt_reconnect,
+    _ReconnectThrottle,
+)
 from .model_config import decode_model_config
+from .problem_logic import compute_voltage_snapshot
 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -27,19 +29,17 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     """Add sensors for passed config_entry in HA."""
-    hub = hass.data[DOMAIN][config_entry.entry_id]
-
-    # One throttle for both coordinators so they do not reconnect independently.
-    reconnect_throttle = _ReconnectThrottle()
-
-    coordinator = DLMSMeterDataCoordinator(hass, hub, reconnect_throttle)
-    await coordinator.async_config_entry_first_refresh()
-
-    coordinator_diag = DLMSMeterConfigCoordinator(hass, hub, reconnect_throttle)
-    await coordinator_diag.async_config_entry_first_refresh()
+    runtime = config_entry.runtime_data
+    hub = runtime.hub
+    coordinator = runtime.coordinator
+    coordinator_diag = runtime.coordinator_diag
 
     new_devices = []
     for dlmsmeter in hub.meters:
+        new_devices.append(SensorDLMSMeterConnection(dlmsmeter))
+        new_devices.append(SensorDLMSMeterManufacturer(dlmsmeter))
+        new_devices.append(SensorDLMSMeterModel(dlmsmeter))
+
         available_params=dlmsmeter.get_available_params()
         for dlmsmeter_param in available_params:
             match dlmsmeter_param["sensor"]:
@@ -50,7 +50,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 case "frequency":
                     new_devices.append(SensorDLMSMeterFrequency(coordinator, dlmsmeter_param))
                 case "power":
-                    # Source data labels reactive power as VA; HA POWER accepts only W.
                     if dlmsmeter_param.get("unit") == "W":
                         new_devices.append(SensorDLMSMeterPower(coordinator, dlmsmeter_param))
                     else:
@@ -83,125 +82,13 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 case "time_duration":
                     new_devices.append(SensorDLMSMeterDiagTimeDuration(coordinator_diag, dlmsmeter_param))
 
+    voltage_obis = runtime.capabilities.get("voltage_obis") or []
+    if voltage_obis:
+        new_devices.append(MinimumPhaseVoltageSensor(runtime, voltage_obis))
+        new_devices.append(MaximumPhaseVoltageSensor(runtime, voltage_obis))
+
     if new_devices:
         async_add_entities(new_devices)
-
-
-class _ReconnectThrottle:
-    """Backoff for reconnect attempts during outages (5s…60s).
-
-    Failed polls still raise UpdateFailed immediately; only reconnect is
-    delayed. claim_attempt() is sync so two coordinators cannot both start
-    a reconnect in the same event-loop tick.
-    """
-
-    _INITIAL_COOLDOWN = 5.0
-    _MAX_COOLDOWN = 60.0
-
-    def __init__(self):
-        self._next_attempt = 0.0
-        self._cooldown = self._INITIAL_COOLDOWN
-        self._in_flight = False
-
-    def claim_attempt(self):
-        """Reserve a reconnect slot, or return False if still cooling down."""
-        if self._in_flight or time.monotonic() < self._next_attempt:
-            return False
-        self._in_flight = True
-        # Placeholder until release(); overwritten on normal completion.
-        self._next_attempt = time.monotonic() + self._cooldown
-        return True
-
-    def release(self, success):
-        """Clear in-flight and update the cooldown from the attempt result."""
-        if success:
-            self._cooldown = self._INITIAL_COOLDOWN
-            self._next_attempt = time.monotonic()
-        else:
-            self._next_attempt = time.monotonic() + self._cooldown
-            self._cooldown = min(self._cooldown * 2, self._MAX_COOLDOWN)
-        self._in_flight = False
-
-    def reset(self):
-        """Reset after a successful poll."""
-        self._cooldown = self._INITIAL_COOLDOWN
-        self._next_attempt = 0.0
-
-
-async def _attempt_reconnect(hass, hub, throttle):
-    """Executor reconnect; only CancelledError can escape."""
-    if not throttle.claim_attempt():
-        return
-    success = False
-    try:
-        await hass.async_add_executor_job(hub.reconnect)
-        success = True
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        _LOGGER.debug("Reconnect attempt failed", exc_info=True)
-    finally:
-        throttle.release(success)
-
-
-class DLMSMeterDataCoordinator(DataUpdateCoordinator):
-    """Coordinator for the fast-changing measurement data."""
-
-    def __init__(self, hass, hub, reconnect_throttle):
-        """Initialize the coordinator."""
-        super().__init__(
-            hass,
-            _LOGGER,
-            name="Meter Data Coordinator",
-            update_interval=timedelta(seconds=3),
-        )
-        self.hub = hub
-        self.hass = hass
-        self._reconnect_throttle = reconnect_throttle
-
-    async def _async_update_data(self):
-        try:
-            async with asyncio.timeout(30):
-                data = await self.hass.async_add_executor_job(self.hub.read_all_data)
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:
-            _LOGGER.error("Meter data update failed: %s", err)
-            await _attempt_reconnect(self.hass, self.hub, self._reconnect_throttle)
-            raise UpdateFailed(err) from err
-        else:
-            self._reconnect_throttle.reset()
-            return data
-
-
-class DLMSMeterConfigCoordinator(DataUpdateCoordinator):
-    """Coordinator for the slow-changing diagnostic/config data."""
-
-    def __init__(self, hass, hub, reconnect_throttle):
-        """Initialize the coordinator."""
-        super().__init__(
-            hass,
-            _LOGGER,
-            name="Meter Config Coordinator",
-            update_interval=timedelta(seconds=600),
-        )
-        self.hub = hub
-        self._reconnect_throttle = reconnect_throttle
-
-    async def _async_update_data(self):
-        try:
-            async with asyncio.timeout(20):
-                data = await self.hass.async_add_executor_job(self.hub.read_all_config)
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:
-            _LOGGER.error("Meter config update failed: %s", err)
-            await _attempt_reconnect(self.hass, self.hub, self._reconnect_throttle)
-            raise UpdateFailed(err) from err
-        else:
-            self._reconnect_throttle.reset()
-            self.hub.update_device_info(data)
-            return data
 
 
 class SensorBase(CoordinatorEntity, SensorEntity):
@@ -212,7 +99,7 @@ class SensorBase(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self.hub=coordinator.hub
         self.dlmsmeter_param = dlmsmeter_param
-        self._attr_unique_id = f"dlms_meter_{self.hub._id}_{dlmsmeter_param['meter_param']}"
+        self._attr_unique_id = build_unique_id(self.hub.identity_key, dlmsmeter_param['meter_param'])
 
 
 class SensorDLMSMeter(SensorBase):
@@ -221,11 +108,8 @@ class SensorDLMSMeter(SensorBase):
         self.meter_param=dlmsmeter_param["meter_param"]
         self._attr_name = f"{dlmsmeter_param['text']}"
 
-        if self.hub._entity_type == "ip":
-            self._attr_name= self._attr_name + " (" + self.hub._id + ")"
-
-        if self.hub._entity_type == "serial":
-            self._attr_name= self._attr_name + " (" + self.hub._id + ")"
+        if self.hub.display_suffix:
+            self._attr_name = f"{self._attr_name} ({self.hub.display_suffix})"
 
         if "unit" in dlmsmeter_param :
             self._attr_native_unit_of_measurement = dlmsmeter_param["unit"]
@@ -233,15 +117,7 @@ class SensorDLMSMeter(SensorBase):
     @property
     def device_info(self):
         """Return information to link this entity with the correct device."""
-        info = {
-            "identifiers": {(DOMAIN, self.hub._id)},
-            # If desired, the name for the device could be different to the entity
-            "name": self.hub._name,
-            "manufacturer": self.hub.meter_client.get_manufacturer(),
-        }
-        # From the 600s config poll; skip fields not read yet.
-        info.update(self.hub.device_info_data)
-        return info
+        return self.hub.build_device_info()
 
     def GtCurrentParamData(self):
         # First refresh may leave coordinator.data as None.
@@ -281,9 +157,8 @@ class SensorDLMSMeterPower(SensorDLMSMeter):
     _attr_device_class = SensorDeviceClass.POWER
 
 class SensorDLMSMeterReactivePower(SensorDLMSMeter):
-    """Reactive power; source unit is mislabelled VA, so leave device_class unset."""
-
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.REACTIVE_POWER
 
 class SensorDLMSMeterEnergyTotal(SensorDLMSMeter):
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -319,6 +194,92 @@ class SensorDLMSMeterDate(SensorDLMSMeter):
         if raw.tzinfo is None:
             raw = raw.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
         return dt_util.as_utc(raw)
+
+
+class SensorDLMSMeterConnection(SensorEntity):
+    """Diagnostic: current connection endpoint. A config value, not a live metric.
+
+    Not a CoordinatorEntity on purpose: it must stay available even while
+    every DLMS poll is failing, since it shows where the integration is
+    configured to connect, not whether that connection currently works.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:lan-connect"
+    _attr_should_poll = False
+
+    def __init__(self, dlmsmeter):
+        self.hub = dlmsmeter.hub
+        self._attr_unique_id = build_unique_id(self.hub.identity_key, "connection")
+        self._attr_name = "Connection"
+        if self.hub.display_suffix:
+            self._attr_name = f"{self._attr_name} ({self.hub.display_suffix})"
+
+    @property
+    def device_info(self):
+        return self.hub.build_device_info()
+
+    @property
+    def native_value(self):
+        return self.hub.endpoint_label
+
+
+class SensorDLMSMeterManufacturer(SensorEntity):
+    """Diagnostic: resolved manufacturer name. Cached metadata, not a live metric.
+
+    Not a CoordinatorEntity on purpose: it must stay available even while
+    every DLMS poll is failing. The state is whatever DeviceInfo shows, or
+    None when that name is omitted (Home Assistant then reports unknown).
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:factory"
+    _attr_should_poll = False
+
+    def __init__(self, dlmsmeter):
+        self.hub = dlmsmeter.hub
+        self._attr_unique_id = build_unique_id(self.hub.identity_key, "manufacturer")
+        self._attr_name = "Manufacturer"
+        if self.hub.display_suffix:
+            self._attr_name = f"{self._attr_name} ({self.hub.display_suffix})"
+
+    @property
+    def device_info(self):
+        return self.hub.build_device_info()
+
+    @property
+    def native_value(self):
+        return self.hub.manufacturer_name
+
+
+class SensorDLMSMeterModel(SensorEntity):
+    """Diagnostic: resolved model name, such as GAMA 300. Cached metadata.
+
+    Not a CoordinatorEntity on purpose: it must stay available even while
+    every DLMS poll is failing. The raw model-id register stays a separate
+    sensor (Model ID); this one is the catalog name DeviceInfo already shows,
+    or None when that name is omitted.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:meter-electric"
+    _attr_should_poll = False
+
+    def __init__(self, dlmsmeter):
+        self.hub = dlmsmeter.hub
+        self._attr_unique_id = build_unique_id(self.hub.identity_key, "model")
+        self._attr_name = "Model"
+        if self.hub.display_suffix:
+            self._attr_name = f"{self._attr_name} ({self.hub.display_suffix})"
+
+    @property
+    def device_info(self):
+        return self.hub.build_device_info()
+
+    @property
+    def native_value(self):
+        return self.hub.model_name
+
 
 _MODEL_OBIS = "1.0.96.1.1.255"
 _MODEL_CONFIG_OBIS = "1.0.96.1.2.255"
@@ -373,3 +334,55 @@ class SensorDLMSMeterDiagCounter(SensorDLMSMeterDiag, SensorDLMSMeterCounter):
 class SensorDLMSMeterDiagTimeDuration(SensorDLMSMeterDiag, SensorDLMSMeterTimeDuration):
     # Lifetime cumulative seconds; base TimeDuration intentionally has no state class.
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+
+class _VoltageAggregateSensor(CoordinatorEntity, SensorEntity):
+    """Shared base for the two voltage extrema sensors.
+
+    Primary measurement entities (no entity_category), backed by the live
+    coordinator like any other measurement -- unlike the three fail-safe
+    binary sensors, these follow the standard unavailable-on-failed-poll
+    convention. The Voltage problem/Grid outage binary sensors use the same
+    compute_voltage_snapshot() helper so all four never disagree.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_native_unit_of_measurement = "V"
+    _attr_has_entity_name = True
+
+    def __init__(self, runtime, translation_key, unique_suffix, expected_obis):
+        super().__init__(runtime.coordinator)
+        self._runtime = runtime
+        self._expected_obis = tuple(expected_obis)
+        self._attr_translation_key = translation_key
+        self._attr_unique_id = build_unique_id(runtime.hub.identity_key, unique_suffix)
+
+    @property
+    def device_info(self):
+        return self._runtime.hub.build_device_info()
+
+    def _snapshot(self):
+        return compute_voltage_snapshot(self.coordinator.data, self._expected_obis)
+
+
+class MinimumPhaseVoltageSensor(_VoltageAggregateSensor):
+    def __init__(self, runtime, expected_obis):
+        super().__init__(runtime, "minimum_phase_voltage", "minimum_phase_voltage", expected_obis)
+
+    @property
+    def native_value(self):
+        if not self.coordinator.last_update_success:
+            return None
+        return self._snapshot().minimum
+
+
+class MaximumPhaseVoltageSensor(_VoltageAggregateSensor):
+    def __init__(self, runtime, expected_obis):
+        super().__init__(runtime, "maximum_phase_voltage", "maximum_phase_voltage", expected_obis)
+
+    @property
+    def native_value(self):
+        if not self.coordinator.last_update_success:
+            return None
+        return self._snapshot().maximum

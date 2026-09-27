@@ -12,7 +12,7 @@
     "meter_param": "1.0.3.7.0.255",
     "meter_attr": 2,
     "multiplier": 0.1,
-    "unit": "VA",
+    "unit": "var",
     "sensor": "power"
   },
   {
@@ -20,7 +20,7 @@
     "meter_param": "1.0.4.7.0.255",
     "meter_attr": 2,
     "multiplier": 0.1,
-    "unit": "VA",
+    "unit": "var",
     "sensor": "power"
   },
   {
@@ -67,7 +67,7 @@
     "meter_param": "1.0.23.7.0.255",
     "meter_attr": 2,
     "multiplier": 0.1,
-    "unit": "VA",
+    "unit": "var",
     "sensor": "power"
   },
   {
@@ -75,7 +75,7 @@
     "meter_param": "1.0.43.7.0.255",
     "meter_attr": 2,
     "multiplier": 0.1,
-    "unit": "VA",
+    "unit": "var",
     "sensor": "power"
   },
   {
@@ -83,7 +83,7 @@
     "meter_param": "1.0.63.7.0.255",
     "meter_attr": 2,
     "multiplier": 0.1,
-    "unit": "VA",
+    "unit": "var",
     "sensor": "power"
   },
   {
@@ -91,7 +91,7 @@
     "meter_param": "1.0.24.7.0.255",
     "meter_attr": 2,
     "multiplier": 0.1,
-    "unit": "VA",
+    "unit": "var",
     "sensor": "power"
   },
   {
@@ -99,7 +99,7 @@
     "meter_param": "1.0.44.7.0.255",
     "meter_attr": 2,
     "multiplier": 0.1,
-    "unit": "VA",
+    "unit": "var",
     "sensor": "power"
   },
   {
@@ -107,7 +107,7 @@
     "meter_param": "1.0.64.7.0.255",
     "meter_attr": 2,
     "multiplier": 0.1,
-    "unit": "VA",
+    "unit": "var",
     "sensor": "power"
   },
   {

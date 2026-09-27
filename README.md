@@ -6,15 +6,15 @@ Home Assistant Integration for reading data from ELGAMA GAMA300 electricity mete
 - Get most of live values from meter
 - Add energy sensors for integration with energy usage
 - Tracks daily / total energy consumption
-
-## Notes
-
-This code was written for couple of days without any skills in Python and HA architecture. That is second time I've used Python, so anyone is welcome to make this code better.
+- Warnings for frequency, voltage and load, with limits you can edit
+- Identify meter manufacturer and model
 
 ## Connecting meter to gateway and HA
 
 First your meter must support RS485 interface (check your meter manual or model number to ensure your meter support it, but also you can try to connect optical reader to gateway). To connect meter to HA you need any RS485->TCP gateway (I've used HI-FLYING HF5142B, coz prefer wires, but you can use any other or try to connect it with esp32 / 8266 with RS485 converter bridging it to TCP socket).
 On gateway side you should configure TCP server to forward data from RS485 port, it should be tcp server without authorization, you can choose any port to listen.
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=astraliens&repository=home-assistant-gama-300-dlms-meter&category=integration)
 
 #### RS485 params:
 - Baud rate: 9600
@@ -32,6 +32,24 @@ Pinout of meter shown on photo:
 
 ![gama_300_rs485_pinout](https://raw.githubusercontent.com/astraliens/home-assistant-gama-300-dlms-meter/main/images/gama_300_rs485_pinout.jpg)
 
+## Changing settings later
+
+Poll interval: *Settings -> Devices & services -> Gama 300 DLMS Meter -> Configure*. Live values are read every 3 seconds by default, you can set that from 3 seconds up to 1 hour. Diagnostic values (model, firmware and so on) are read every 10 minutes, from 1 minute up to 1 day.
+
+Gateway address: *Reconfigure* on the same integration entry. Put in the new IP or port. The device, sensor names and history stay. Serial number belongs to the meter you added and cannot be edited here; a different meter is a separate entry.
+
+## Frequency, voltage and load warnings
+
+On the device page, under Configuration, there are limits. Saving one applies immediately. Nothing is written to the meter.
+
+- Frequency min / max
+- Voltage min / max with hysteresis
+- Grid outage
+- Max power L1 / L2 / L3 / with hysteresis
+- Frequency problem, Voltage problem, Grid outage
+- L1 / L2 / L3 overload, Total power overload. Power is compared by absolute value, so export over the limit counts too.
+
+If values go out of the limits - sensors goes to "Problem" state
 
 ## Energy consumption monitoring
 

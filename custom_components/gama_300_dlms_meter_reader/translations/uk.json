@@ -1,24 +1,111 @@
 {
     "config": {
         "abort": {
-            "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+            "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+            "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]",
+            "wrong_meter": "Лічильник за цією адресою має інший серійний номер, ніж налаштований тут. Додайте його як новий запис інтеграції.",
+            "duplicate_meter_identity": "Цей серійний номер лічильника вже використовується іншим записом інтеграції. Видаліть дублікат, перш ніж змінювати підключення цього запису."
         },
         "error": {
             "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
             "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
-            "unknown": "[%key:common::config_flow::error::unknown%]"
+            "unknown": "[%key:common::config_flow::error::unknown%]",
+            "entry_busy": "Це підключення лічильника зараз запускається або зупиняється. Спробуйте ще раз за кілька секунд."
         },
         "step": {
             "user": {
                 "data": {
-                    "host": "IP",
-                    "port": "Порт",
-                    "serial": "Серійний номер",
-                    "entity_type": "Додавати до назв сутностей",
+                    "host": "IP лічильника",
+                    "port": "Порт лічильника",
+                    "serial": "Серійний номер лічильника",
+                    "entity_type": "Суфікс у назвах сутностей",
                     "password": "[%key:common::config_flow::data::password%]",
                     "username": "[%key:common::config_flow::data::username%]"
+                },
+                "data_description": {
+                    "host": "IP-адреса або ім’я хоста шлюзу лічильника (наприклад, перетворювача RS485→TCP).",
+                    "port": "TCP-порт DLMS-шлюзу (часто 4059).",
+                    "serial": "Серійний номер, нанесений на електролічильник. За ним Home Assistant розрізняє цей прилад.",
+                    "entity_type": "Необов’язковий текст у кінці назв сенсорів, щоб розрізняти кілька лічильників. Для одного лічильника достатньо Default.",
+                    "username": "Ім’я користувача DLMS-клієнта, якщо лічильник вимагає автентифікації.",
+                    "password": "Пароль DLMS для вказаного користувача."
+                }
+            },
+            "reconfigure": {
+                "title": "Оновлення підключення лічильника",
+                "description": "Зміна адреси шлюзу для лічильника {serial}. Пристрій, його сутності та історія лишаються без змін — оновлюється лише з’єднання.",
+                "data": {
+                    "host": "IP лічильника",
+                    "port": "Порт лічильника"
+                },
+                "data_description": {
+                    "host": "Нова IP-адреса або ім’я хоста шлюзу лічильника.",
+                    "port": "Новий TCP-порт DLMS-шлюзу (часто 4059)."
                 }
             }
         }
-   }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Інтервали опитування",
+                "data": {
+                    "scan_interval": "Інтервал опитування живих даних (секунди)",
+                    "diag_scan_interval": "Інтервал опитування діагностичних даних (секунди)"
+                },
+                "data_description": {
+                    "scan_interval": "Як часто опитувати живі вимірювання (напруга, потужність, енергія тощо). За замовчуванням 3, дозволений діапазон 3–3600.",
+                    "diag_scan_interval": "Як часто опитувати повільні діагностичні/конфігураційні значення. За замовчуванням 600, дозволений діапазон 60–86400."
+                }
+            }
+        }
+    },
+    "entity": {
+        "number": {
+            "frequency_min_hz": { "name": "Мінімальна частота" },
+            "frequency_max_hz": { "name": "Максимальна частота" },
+            "voltage_min_v": { "name": "Мінімальна допустима напруга" },
+            "voltage_max_v": { "name": "Максимальна допустима напруга" },
+            "grid_outage_voltage_v": { "name": "Порог зникнення напруги" },
+            "voltage_hysteresis_v": { "name": "Гістерезис напруги" },
+            "phase_l1_max_power_w": { "name": "Максимальна активна потужність L1" },
+            "phase_l2_max_power_w": { "name": "Максимальна активна потужність L2" },
+            "phase_l3_max_power_w": { "name": "Максимальна активна потужність L3" },
+            "total_max_power_w": { "name": "Максимальна сумарна активна потужність" },
+            "power_hysteresis_w": { "name": "Гістерезис потужності" }
+        },
+        "binary_sensor": {
+            "frequency_problem": { "name": "Проблема частоти" },
+            "voltage_problem": { "name": "Проблема напруги" },
+            "grid_outage": { "name": "Зникнення напруги мережі" },
+            "phase_l1_overload": { "name": "Перевантаження L1" },
+            "phase_l2_overload": { "name": "Перевантаження L2" },
+            "phase_l3_overload": { "name": "Перевантаження L3" },
+            "total_power_overload": { "name": "Перевантаження за сумарною потужністю" }
+        },
+        "sensor": {
+            "minimum_phase_voltage": { "name": "Мінімальна фазна напруга" },
+            "maximum_phase_voltage": { "name": "Максимальна фазна напруга" }
+        }
+    },
+    "exceptions": {
+        "invalid_number": {
+            "message": "Значення для {key} має бути скінченним числом."
+        },
+        "invalid_frequency_range": {
+            "message": "Межі частоти мають відповідати умові 0 < мінімум < максимум <= 100 Гц."
+        },
+        "invalid_voltage_range": {
+            "message": "Пороги напруги мають відповідати умові 0 <= порог зникнення < мінімум < максимум <= 500 В."
+        },
+        "invalid_voltage_hysteresis": {
+            "message": "Гістерезис напруги має залишати коректний діапазон відновлення: гістерезис >= 0, порог зникнення + гістерезис <= мінімум, і 2 × гістерезис < максимум - мінімум."
+        },
+        "invalid_power_limit": {
+            "message": "Кожен ліміт активної потужності має бути скінченним числом, більшим за 0 Вт."
+        },
+        "invalid_power_hysteresis": {
+            "message": "Гістерезис потужності має бути не меншим за 0 Вт і меншим за найменший ліміт активної потужності."
+        }
+    }
 }
