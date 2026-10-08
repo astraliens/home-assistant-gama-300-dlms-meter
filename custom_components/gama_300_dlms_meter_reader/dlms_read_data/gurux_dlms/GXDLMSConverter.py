@@ -32,7 +32,7 @@
 #  Full text may be retrieved at http://www.gnu.org/licenses/gpl-2.0.txt
 # ---------------------------------------------------------------------------
 from __future__ import print_function
-import pkg_resources
+from pathlib import Path
 from .enums import Standard, ObjectType, DataType
 from .GXStandardObisCodeCollection import GXStandardObisCodeCollection
 from .GXStandardObisCode import GXStandardObisCode
@@ -51,6 +51,10 @@ from .GXDateTime import GXDateTime
 from .GXTime import GXTime
 from .GXByteBuffer import GXByteBuffer
 from .manufacturersettings.GXObisCode import GXObisCode
+
+def _resource_bytes(name):
+    # File-relative on purpose: this package is imported under two names (see KI-32).
+    return (Path(__file__).parent / name).read_bytes()
 
 ###Python 2 requires this
 #pylint: disable=bad-option-value,old-style-class
@@ -148,13 +152,13 @@ class GXDLMSConverter:
     def __getObjects(cls, standard):
         codes = list()
         if standard == Standard.ITALY:
-            str_ = pkg_resources.resource_string(__name__, "Italy.txt").decode("utf-8")
+            str_ = _resource_bytes("Italy.txt").decode("utf-8")
         elif standard == Standard.INDIA:
-            str_ = pkg_resources.resource_string(__name__, "India.txt").decode("utf-8")
+            str_ = _resource_bytes("India.txt").decode("utf-8")
         elif standard == Standard.SAUDI_ARABIA:
-            str_ = pkg_resources.resource_string(__name__, "SaudiArabia.txt").decode("utf-8")
+            str_ = _resource_bytes("SaudiArabia.txt").decode("utf-8")
         elif standard == Standard.SPAIN:
-            str_ = pkg_resources.resource_string(__name__, "Spain.txt").decode("utf-8")
+            str_ = _resource_bytes("Spain.txt").decode("utf-8")
         if not str_:
             return None
         str_ = str_.replace("\n", "\r")
@@ -184,7 +188,7 @@ class GXDLMSConverter:
                 tmp.uiDataType = it.uiDataType
                 codes.append(tmp)
 
-        str_ = pkg_resources.resource_string(__name__, "OBISCodes.txt").decode("utf-8")
+        str_ = _resource_bytes("OBISCodes.txt").decode("utf-8")
         str_ = str_.replace("\n", "\r")
         rows = str_.split('\r')
         for it in rows:
